@@ -20,6 +20,8 @@
 
 using std::string;
 using std::vector;
+using std::endl;
+using std::cout;
 
 void ParticleFilter::init(double x, double y, double theta, double std[]) {
   /**
@@ -30,7 +32,10 @@ void ParticleFilter::init(double x, double y, double theta, double std[]) {
    * NOTE: Consult particle_filter.h for more information about this method 
    *   (and others in this file).
    */
+  cout << "Initializing..." << endl;
   num_particles = 100;  // TODO: Set the number of particles
+  
+  weights = vector<double>(num_particles,1.0);
   
   std::default_random_engine gen;
   
@@ -47,6 +52,9 @@ void ParticleFilter::init(double x, double y, double theta, double std[]) {
     p.theta = dist_theta(gen);
     particles.push_back(p);    
   }
+  
+  is_initialized = true;
+  cout << "Init Complete" << endl;
       
 
 }
@@ -60,16 +68,20 @@ void ParticleFilter::prediction(double delta_t, double std_pos[],
    *  http://en.cppreference.com/w/cpp/numeric/random/normal_distribution
    *  http://www.cplusplus.com/reference/random/default_random_engine/
    */
+  cout << "Predicting..." << endl;
+  std::default_random_engine gen;
+  std::normal_distribution<double> x_stddev(0.0,std_pos[0]);
+  std::normal_distribution<double> y_stddev(0.0,std_pos[1]);
+  std::normal_distribution<double> theta_stddev(0.0,std_pos[2]);
+  
   for (std::vector<Particle>::iterator it = particles.begin() ; it != particles.end(); ++it){
-    std::default_random_engine gen;
-    std::normal_distribution<double> x_stddev(0.0,std_pos[0]);
-  	std::normal_distribution<double> y_stddev(0.0,std_pos[1]);
-  	std::normal_distribution<double> theta_stddev(0.0,std_pos[2]);
+    
   
     it->x += velocity/yaw_rate*(sin(it->theta + yaw_rate*delta_t) - sin(it->theta)) + x_stddev(gen);
     it->y += velocity/yaw_rate*(cos(it->theta) - cos(it->theta +yaw_rate*delta_t)) + y_stddev(gen);
-  	it->theta += yaw_rate*delta_t + theta_stddev(gen);
-  }  
+    it->theta += yaw_rate*delta_t + theta_stddev(gen);
+  }
+  cout << "Prediction Done" << endl;
 
 }
 
@@ -102,31 +114,45 @@ void ParticleFilter::updateWeights(double sensor_range, double std_landmark[],
    *   and the following is a good resource for the actual equation to implement
    *   (look at equation 3.33) http://planning.cs.uiuc.edu/node99.html
    */
-
-  for (std::vector<Particle>::iterator it = particles.begin() ; it != particles.end(); ++it){
-    it->weight = 1;
-    for(std::vector<LandmarkObs>::const_iterator obs_it = observations.begin(); obs_it != observations.end(); ++it){
-      
-      double x_trans = it->x + (cos(it->theta) * obs_it->x) - (sin(it->theta) * obs_it->y);
-
-      double y_trans = it->y + (sin(it->theta) * obs_it->x) + (cos(it->theta) * obs_it->y);
-   
-      double min_dist = dist(x_trans, y_trans, map_landmarks.landmark_list[0].x_f, map_landmarks.landmark_list[0].y_f);
-      int min_ndx = 0;
-      for(int i = 1; i < map_landmarks.landmark_list.size(); i++){
-        double temp_dist = dist(x_trans, y_trans, map_landmarks.landmark_list[i].x_f, map_landmarks.landmark_list[i].y_f);
-        if (temp_dist < min_dist){
-          min_dist = temp_dist;
-          min_ndx = i;
+  if(observations.size() > 0){
+    cout << "Updating weights..." << endl;
+    for (std::vector<Particle>::iterator it = particles.begin() ; it != particles.end(); ++it){
+      it->weight = 1;
+      vector<int> ass;
+      vector<double> x_ass;
+      vector<double> y_ass;
+      for(std::vector<LandmarkObs>::const_iterator obs_it = observations.begin(); obs_it != observations.end(); ++obs_it){
+        double x_trans = it->x + (cos(it->theta) * obs_it->x) - (sin(it->theta) * obs_it->y);
+        x_ass.push_back(x_trans);
+        double y_trans = it->y + (sin(it->theta) * obs_it->x) + (cos(it->theta) * obs_it->y);
+        y_ass.push_back(y_trans);
+        double min_dist = dist(x_trans, y_trans, map_landmarks.landmark_list[0].x_f, map_landmarks.landmark_list[0].y_f);
+        int min_ndx = 0;
+        int min_id = map_landmarks.landmark_list[0].id_i;
+        for(int i = 1; i < map_landmarks.landmark_list.size(); i++){
+          double temp_dist = dist(x_trans, y_trans, map_landmarks.landmark_list[i].x_f, map_landmarks.landmark_list[i].y_f);
+          if (temp_dist < min_dist){
+            min_dist = temp_dist;
+            min_ndx = i;
+            min_id = map_landmarks.landmark_list[i].id_i;
+          }
         }
+        ass.push_back(min_id);
+        
+        it->weight *= multiv_prob( std_landmark[0], std_landmark[1],x_trans, y_trans, map_landmarks.landmark_list[min_ndx].x_f, map_landmarks.landmark_list[min_ndx].y_f);
+        if(it->weight < 0.0){
+          cout << it->weight << endl;
+        }
+        
       }
-      it->weight *= multiv_prob(x_trans, y_trans, map_landmarks.landmark_list[min_ndx].x_f, map_landmarks.landmark_list[min_ndx].y_f, std_landmark[0], std_landmark[1]);
-    }
-    weights[it->id] = it->weight;
+      SetAssociations(*it, ass, x_ass, y_ass);
+      weights[(int)(it-particles.begin())] = it->weight;
+
+     }
+
+
+    cout << "Weights updated" << endl;
   }
-  
-  
-  
 }
 
 void ParticleFilter::resample() {
@@ -137,6 +163,7 @@ void ParticleFilter::resample() {
    *   http://en.cppreference.com/w/cpp/numeric/random/discrete_distribution
    */
 
+  cout << "Resampling..." << endl;
   std::default_random_engine gen;
   std::discrete_distribution<int> rand_ndx(0, num_particles-1);
   
@@ -147,6 +174,7 @@ void ParticleFilter::resample() {
   vector<double>::iterator wMax = max_element(weights.begin(), weights.end());
   for(int i = 0; i < num_particles; i++){
     beta += 2.0 * *wMax * static_cast<double>(rand()) / static_cast<double>(RAND_MAX);
+    cout << ndx << endl;
     while(weights[ndx] < beta){
       beta -= weights[ndx];
       if(ndx < num_particles - 1){
@@ -156,10 +184,12 @@ void ParticleFilter::resample() {
         ndx = 0;
       }
     }
-    newSample.push_back(particles[ndx]);
+    Particle forPushing = particles[ndx];
+    forPushing.id = i;
+    newSample.push_back(forPushing);
   }
   particles = newSample;
-  
+  cout << "Resample completed" << endl;
 }
 
 void ParticleFilter::SetAssociations(Particle& particle, 
