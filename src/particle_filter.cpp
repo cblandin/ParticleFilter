@@ -15,6 +15,7 @@
 #include <random>
 #include <string>
 #include <vector>
+#include <chrono>
 
 #include "helper_functions.h"
 
@@ -52,7 +53,7 @@ void ParticleFilter::init(double x, double y, double theta, double std[]) {
     p.theta = dist_theta(gen);
     particles.push_back(p);    
   }
-  
+    
   is_initialized = true;
   cout << "Init Complete" << endl;
       
@@ -74,12 +75,20 @@ void ParticleFilter::prediction(double delta_t, double std_pos[],
   std::normal_distribution<double> y_stddev(0.0,std_pos[1]);
   std::normal_distribution<double> theta_stddev(0.0,std_pos[2]);
   
-  for (std::vector<Particle>::iterator it = particles.begin() ; it != particles.end(); ++it){
-    
-  
-    it->x += velocity/yaw_rate*(sin(it->theta + yaw_rate*delta_t) - sin(it->theta)) + x_stddev(gen);
-    it->y += velocity/yaw_rate*(cos(it->theta) - cos(it->theta +yaw_rate*delta_t)) + y_stddev(gen);
-    it->theta += yaw_rate*delta_t + theta_stddev(gen);
+  if (yaw_rate > 0.00001){
+    for (std::vector<Particle>::iterator it = particles.begin() ; it != particles.end(); ++it){
+
+      it->x += velocity/yaw_rate*(sin(it->theta + yaw_rate*delta_t) - sin(it->theta)) + x_stddev(gen);
+      it->y += velocity/yaw_rate*(cos(it->theta) - cos(it->theta +yaw_rate*delta_t)) + y_stddev(gen);
+      it->theta += yaw_rate*delta_t + theta_stddev(gen);
+    }
+  }
+  else{
+    for (std::vector<Particle>::iterator it = particles.begin() ; it != particles.end(); ++it){
+      it->x += velocity*(cos(it->theta))*delta_t + x_stddev(gen);
+      it->y += velocity*(sin(it->theta))*delta_t + y_stddev(gen);
+      it->theta += yaw_rate*delta_t + theta_stddev(gen);
+    }
   }
   cout << "Prediction Done" << endl;
 
@@ -146,7 +155,7 @@ void ParticleFilter::updateWeights(double sensor_range, double std_landmark[],
         
       }
       SetAssociations(*it, ass, x_ass, y_ass);
-      weights[(int)(it-particles.begin())] = it->weight;
+      weights[static_cast<int>(it-particles.begin())] = it->weight;
 
      }
 
@@ -164,17 +173,21 @@ void ParticleFilter::resample() {
    */
 
   cout << "Resampling..." << endl;
-  std::default_random_engine gen;
-  std::discrete_distribution<int> rand_ndx(0, num_particles-1);
   
   vector<Particle> newSample;
   
-  int ndx = rand_ndx(gen);
-  double beta = 0;
+  unsigned seed = std::chrono::system_clock::now().time_since_epoch().count();
+  std::default_random_engine gen (seed);
+
+  std::uniform_int_distribution<int> rand_ints(0,num_particles);
+  
+  int ndx = rand_ints(gen);
+  cout << "Random_ndx " << ndx << endl;
+  double beta = 0.0;
   vector<double>::iterator wMax = max_element(weights.begin(), weights.end());
   for(int i = 0; i < num_particles; i++){
-    beta += 2.0 * *wMax * static_cast<double>(rand()) / static_cast<double>(RAND_MAX);
-    cout << ndx << endl;
+    beta += 2.0 * (*wMax) * static_cast<double>(std::rand()) / static_cast<double>(RAND_MAX);
+    
     while(weights[ndx] < beta){
       beta -= weights[ndx];
       if(ndx < num_particles - 1){
